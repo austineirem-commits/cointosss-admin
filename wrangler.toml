@@ -1,0 +1,15 @@
+name = "coin-app-backend"
+main = "src/index.js"
+compatibility_date = "2024-09-25"
+
+# Database binding - fill in database_id after running:
+# npx wrangler d1 create coin-app-db
+[[d1_databases]]
+binding = "DB"
+database_name = "coin-app-db"
+database_id = "PASTE_YOUR_DATABASE_ID_HERE"
+
+# Weekly reset: runs Friday 23:00 UTC = Saturday 00:00 in Nigeria (WAT, UTC+1)
+# Adjust the hour if you are in a different timezone.
+[triggers]
+crons = ["0 23 * * 5"]

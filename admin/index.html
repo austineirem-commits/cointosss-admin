@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Coin App — Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  :root { --bg:#111; --green:#00D632; --gold:#FFC300; --card:#1a1a1a; --border:#2a2a2a; --red:#ff5555; }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: #fff; font-family: system-ui, sans-serif; padding: 20px; max-width: 1000px; margin: 0 auto; }
+  h1 { color: var(--gold); }
+  h3 { margin-bottom: 10px; }
+  input, textarea, select { width: 100%; padding: 10px; margin-bottom: 10px; background: #0d0d0d; border: 1px solid var(--border); border-radius: 8px; color: #fff; font-size: 14px; }
+  button { padding: 10px 16px; background: var(--green); color: #06210f; font-weight: 700; border: none; border-radius: 8px; cursor: pointer; margin-right: 8px; font-size: 13px; }
+  button.danger { background: var(--red); color: #fff; }
+  button.secondary { background: transparent; border: 1px solid var(--gold); color: var(--gold); }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .banned { color: var(--red); font-weight: 700; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+  #login-gate { max-width: 400px; margin: 100px auto; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+  .user-link { cursor: pointer; color: var(--green); text-decoration: underline; }
+  #selected-user-banner { background: #0d0d0d; border: 1px solid var(--gold); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="login-gate" class="card">
+  <h1>Admin Login</h1>
+  <input id="admin-key-input" type="password" placeholder="Admin key">
+  <input id="api-url-input" type="text" placeholder="Backend URL e.g. https://coin-app-backend.xxx.workers.dev">
+  <button onclick="doLogin()">Enter</button>
+</div>
+
+<div id="admin-panel" style="display:none;">
+  <h1>Coin App — Admin Panel</h1>
+
+  <div id="selected-user-banner" style="display:none;"></div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>💰 Add bonus</h3>
+      <input id="bonus-user-id" type="number" placeholder="User ID">
+      <input id="bonus-amount" type="number" placeholder="Amount (e.g. 500)">
+      <input id="bonus-note" type="text" placeholder="Reason (optional, shown to user)">
+      <button onclick="addBonus()">Add Bonus</button>
+      <p style="color:var(--text-dim); font-size:12px; margin-top:8px;">Adds to both weekly and lifetime coins — counts toward rank.</p>
+    </div>
+
+    <div class="card">
+      <h3>⚠️ Deduct coins (punishment)</h3>
+      <input id="deduct-user-id" type="number" placeholder="User ID">
+      <input id="deduct-amount" type="number" placeholder="Amount (e.g. 200)">
+      <input id="deduct-note" type="text" placeholder="Reason (optional, shown to user)">
+      <button class="danger" onclick="deductCoins()">Deduct Coins</button>
+      <p style="color:var(--text-dim); font-size:12px; margin-top:8px;">Only deducts weekly coins — lifetime rank is not affected. Never goes below 0.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>📢 Send message</h3>
+    <input id="msg-user-id" type="text" placeholder="User ID (leave blank to message everyone)">
+    <textarea id="msg-content" placeholder="Message text"></textarea>
+    <button onclick="sendMessage()">Send</button>
+  </div>
+
+  <div class="card">
+    <div class="row" style="margin-bottom:12px;">
+      <h3 style="flex:2;">👥 All users</h3>
+      <input id="search-box" type="text" placeholder="Search username..." oninput="renderUsers()" style="flex:3; margin-bottom:0;">
+      <button onclick="loadUsers()" style="flex:1;">Refresh</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>ID</th><th>Username</th><th>Coins</th><th>Lifetime</th><th>Rank</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="users-table"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let API_URL = "";
+let ADMIN_KEY = "";
+let allUsers = [];
+
+function doLogin() {
+  ADMIN_KEY = document.getElementById("admin-key-input").value.trim();
+  API_URL = document.getElementById("api-url-input").value.trim().replace(/\/$/, "");
+  if (!ADMIN_KEY || !API_URL) return alert("Fill both fields.");
+  document.getElementById("login-gate").style.display = "none";
+  document.getElementById("admin-panel").style.display = "block";
+  loadUsers();
+}
+
+async function adminFetch(path, options = {}) {
+  const res = await fetch(API_URL + path, {
+    ...options,
+    headers: { "Content-Type": "application/json", "x-admin-key": ADMIN_KEY, ...(options.headers||{}) },
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Error");
+  return data;
+}
+
+async function loadUsers() {
+  try {
+    const data = await adminFetch("/admin/users");
+    allUsers = data.users;
+    renderUsers();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function renderUsers() {
+  const search = document.getElementById("search-box").value.trim().toLowerCase();
+  const filtered = search
+    ? allUsers.filter(u => u.username.toLowerCase().includes(search))
+    : allUsers;
+
+  const tbody = document.getElementById("users-table");
+  tbody.innerHTML = filtered.map(u => `
+    <tr>
+      <td>${u.id}</td>
+      <td><span class="user-link" onclick="selectUser(${u.id}, '${u.username.replace(/'/g, "\\'")}')">${u.username}</span></td>
+      <td>${u.coins}</td>
+      <td>${u.lifetime_coins}</td>
+      <td>${u.rank}</td>
+      <td class="${u.banned ? 'banned' : ''}">${u.banned ? 'BANNED' : 'active'}</td>
+      <td>
+        <button onclick="toggleBan(${u.id}, ${u.banned ? 0 : 1})" class="${u.banned ? '' : 'danger'}">${u.banned ? 'Unban' : 'Ban'}</button>
+      </td>
+    </tr>
+  `).join("");
+}
+
+function selectUser(id, username) {
+  document.getElementById("bonus-user-id").value = id;
+  document.getElementById("deduct-user-id").value = id;
+  document.getElementById("msg-user-id").value = id;
+  const banner = document.getElementById("selected-user-banner");
+  banner.style.display = "block";
+  banner.textContent = `Selected: ${username} (ID ${id}) — filled into the forms above`;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function toggleBan(userId, banned) {
+  try {
+    await adminFetch("/admin/ban", { method: "POST", body: JSON.stringify({ userId, banned: !!banned }) });
+    loadUsers();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function sendMessage() {
+  const userIdRaw = document.getElementById("msg-user-id").value.trim();
+  const content = document.getElementById("msg-content").value.trim();
+  if (!content) return alert("Write a message first.");
+  try {
+    await adminFetch("/admin/message", {
+      method: "POST",
+      body: JSON.stringify({ userId: userIdRaw ? parseInt(userIdRaw) : null, content }),
+    });
+    document.getElementById("msg-content").value = "";
+    alert("Sent.");
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function addBonus() {
+  const userId = parseInt(document.getElementById("bonus-user-id").value);
+  const amount = parseInt(document.getElementById("bonus-amount").value);
+  const note = document.getElementById("bonus-note").value.trim();
+  if (!userId || !amount || amount <= 0) return alert("Enter a valid User ID and a positive amount.");
+
+  try {
+    await adminFetch("/admin/add-bonus", {
+      method: "POST",
+      body: JSON.stringify({ userId, amount, note: note || undefined }),
+    });
+    document.getElementById("bonus-amount").value = "";
+    document.getElementById("bonus-note").value = "";
+    alert(`Added ${amount} coins.`);
+    loadUsers();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function deductCoins() {
+  const userId = parseInt(document.getElementById("deduct-user-id").value);
+  const amount = parseInt(document.getElementById("deduct-amount").value);
+  const note = document.getElementById("deduct-note").value.trim();
+  if (!userId || !amount || amount <= 0) return alert("Enter a valid User ID and a positive amount.");
+  if (!confirm(`Deduct ${amount} coins from user ${userId}?`)) return;
+
+  try {
+    await adminFetch("/admin/deduct-coins", {
+      method: "POST",
+      body: JSON.stringify({ userId, amount, note: note || undefined }),
+    });
+    document.getElementById("deduct-amount").value = "";
+    document.getElementById("deduct-note").value = "";
+    alert(`Deducted ${amount} coins.`);
+    loadUsers();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+</script>
+</body>
+</html>
